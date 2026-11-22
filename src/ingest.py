@@ -1,10 +1,16 @@
 import pandas as pd
 import io
 import requests
-from config import API_KEY
+import time
+import logging
+from datetime import date
+from config import API_KEY, RAWDATA
 
+log = logging.getLogger(__name__)
 
-def fetch_daily(symbol:str):
+tdate = date.today().strftime('%Y-%m-%d')
+
+def fetch_daily(symbol:str) -> pd.DataFrame:
     try:
         response = requests.get(
             url="https://www.alphavantage.co/query?",
@@ -22,43 +28,33 @@ def fetch_daily(symbol:str):
             raise Exception("Error")
         else:
             df = pd.read_csv(io.StringIO(response.text))
+            log.info("Successfully fetched symbol: %s, rows: %d", symbol, df.shape[0])
             return df
     except Exception as e:
-        print(e)
+        log.exception(e)
 
 
-def standarise():
-    pass
+def standarise(df:pd.DataFrame, symbol:str) -> pd.DataFrame:
+    normDF = df.rename(columns=lambda x : str.lower(x) if str.lower(x) != "timestamp" else "date")
+    normDF.insert(loc=0, column="symbol", value=symbol)
+    return normDF
 
-def ingest():
-    pass
-
-
-
-
-
-
-# def getSymbol():
-#     print("Enter Symbol")
-#     return input()
-# def getDataType():
-#     print("Enter DataType")
-#     return input()
-# def getData(Symbol, datatype):
-#     url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={Symbol}&apikey={APIKey}&datatype={"csv"}"
-#     Data = pd.read_csv(url)
-#     return Data
-
-# class ColumnTypes:
-#     date = ""
-#     symbol = ""
-#     open = ""
-#     high = ""
-#     low = ""
-#     close = ""
-#     volume = ""
-
-# symbol = gc.getSymbol()
-
-# Data = gc.getData(symbol, "a")
-# print(Data.head())
+def ingest(symbols:list, use_cache:bool):
+    list_df = []
+    for obj in symbols:
+        file = f"{obj}_{tdate}.csv"
+        if use_cache and (RAWDATA/file).exists():
+            df = pd.read_csv(RAWDATA/file)
+            list_df.append(df)
+        else:
+            fetched = fetch_daily(obj)
+            if fetched is None:
+                log.error("Symbol failed to fetch: %s", symbols)
+                continue
+            df = standarise(fetched, obj)
+            df.to_csv(RAWDATA/file, index = False)
+            list_df.append(df)
+            time.sleep(0.048)
+    combinedDF = pd.concat(list_df)
+    return combinedDF
+        
